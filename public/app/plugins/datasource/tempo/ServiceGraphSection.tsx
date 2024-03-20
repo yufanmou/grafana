@@ -6,8 +6,8 @@ import { GrafanaTheme2 } from '@grafana/data';
 import { Alert, InlineField, InlineFieldRow, useStyles2 } from '@grafana/ui';
 
 import { AdHocFilter } from './_importedDependencies/components/AdHocFilter/AdHocFilter';
+import { AdHocVariableFilter } from './_importedDependencies/components/AdHocFilter/types';
 import { PrometheusDatasource } from './_importedDependencies/datasources/prometheus/types';
-import { AdHocVariableFilter } from './_importedDependencies/types';
 import { TempoQuery } from './types';
 import { getDS } from './utils';
 
@@ -67,7 +67,9 @@ export function ServiceGraphSection({
     );
   }
 
-  const filters = queryToFilter(query.serviceMapQuery || '');
+  const filters = queryToFilter(
+    (Array.isArray(query.serviceMapQuery) ? query.serviceMapQuery[0] : query.serviceMapQuery) || ''
+  );
 
   return (
     <div>

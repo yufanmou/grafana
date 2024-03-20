@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/go-sql-driver/mysql"
+
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/services/sqlstore/migrator"
 	"github.com/grafana/grafana/pkg/setting"
@@ -24,6 +25,7 @@ type DatabaseConfig struct {
 	Pwd                         string
 	Path                        string
 	SslMode                     string
+	SSLSNI                      string
 	CaCertPath                  string
 	ClientKeyPath               string
 	ClientCertPath              string
@@ -45,7 +47,7 @@ type DatabaseConfig struct {
 	TransactionRetries int
 }
 
-func NewDatabaseConfig(cfg *setting.Cfg) (*DatabaseConfig, error) {
+func NewDatabaseConfig(cfg *setting.Cfg, features featuremgmt.FeatureToggles) (*DatabaseConfig, error) {
 	if cfg == nil {
 		return nil, errors.New("cfg cannot be nil")
 	}
@@ -55,7 +57,7 @@ func NewDatabaseConfig(cfg *setting.Cfg) (*DatabaseConfig, error) {
 		return nil, err
 	}
 
-	if err := dbCfg.buildConnectionString(cfg); err != nil {
+	if err := dbCfg.buildConnectionString(cfg, features); err != nil {
 		return nil, err
 	}
 
@@ -100,6 +102,7 @@ func (dbCfg *DatabaseConfig) readConfig(cfg *setting.Cfg) error {
 	dbCfg.ConnMaxLifetime = sec.Key("conn_max_lifetime").MustInt(14400)
 
 	dbCfg.SslMode = sec.Key("ssl_mode").String()
+	dbCfg.SSLSNI = sec.Key("ssl_sni").String()
 	dbCfg.CaCertPath = sec.Key("ca_cert_path").String()
 	dbCfg.ClientKeyPath = sec.Key("client_key_path").String()
 	dbCfg.ClientCertPath = sec.Key("client_cert_path").String()
@@ -120,7 +123,7 @@ func (dbCfg *DatabaseConfig) readConfig(cfg *setting.Cfg) error {
 	return nil
 }
 
-func (dbCfg *DatabaseConfig) buildConnectionString(cfg *setting.Cfg) error {
+func (dbCfg *DatabaseConfig) buildConnectionString(cfg *setting.Cfg, features featuremgmt.FeatureToggles) error {
 	if dbCfg.ConnectionString != "" {
 		return nil
 	}
@@ -154,8 +157,7 @@ func (dbCfg *DatabaseConfig) buildConnectionString(cfg *setting.Cfg) error {
 			cnnstr += fmt.Sprintf("&transaction_isolation=%s", val)
 		}
 
-		// nolint:staticcheck
-		if cfg.IsFeatureToggleEnabled(featuremgmt.FlagMysqlAnsiQuotes) {
+		if features != nil && features.IsEnabledGlobally(featuremgmt.FlagMysqlAnsiQuotes) {
 			cnnstr += "&sql_mode='ANSI_QUOTES'"
 		}
 
@@ -168,12 +170,16 @@ func (dbCfg *DatabaseConfig) buildConnectionString(cfg *setting.Cfg) error {
 
 		args := []any{dbCfg.User, addr.Host, addr.Port, dbCfg.Name, dbCfg.SslMode, dbCfg.ClientCertPath,
 			dbCfg.ClientKeyPath, dbCfg.CaCertPath}
+
 		for i, arg := range args {
 			if arg == "" {
 				args[i] = "''"
 			}
 		}
 		cnnstr = fmt.Sprintf("user=%s host=%s port=%s dbname=%s sslmode=%s sslcert=%s sslkey=%s sslrootcert=%s", args...)
+		if dbCfg.SSLSNI != "" {
+			cnnstr += fmt.Sprintf(" sslsni=%s", dbCfg.SSLSNI)
+		}
 		if dbCfg.Pwd != "" {
 			cnnstr += fmt.Sprintf(" password=%s", dbCfg.Pwd)
 		}

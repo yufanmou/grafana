@@ -43,27 +43,26 @@ func (api *API) authorize(method, path string) web.Handler {
 			ac.EvalPermission(ac.ActionAlertingRuleCreate, scope),
 			ac.EvalPermission(ac.ActionAlertingRuleDelete, scope),
 		)
-		// Grafana rule state history paths
+
+	// Grafana rule state history paths
 	case http.MethodGet + "/api/v1/rules/history":
 		eval = ac.EvalPermission(ac.ActionAlertingRuleRead)
 
-	// Grafana unified alerting upgrade paths
-	case http.MethodGet + "/api/v1/upgrade/org":
-		return middleware.ReqOrgAdmin
-	case http.MethodPost + "/api/v1/upgrade/org":
-		return middleware.ReqOrgAdmin
-	case http.MethodDelete + "/api/v1/upgrade/org":
-		return middleware.ReqOrgAdmin
-	case http.MethodPost + "/api/v1/upgrade/dashboards":
-		return middleware.ReqOrgAdmin
-	case http.MethodPost + "/api/v1/upgrade/dashboards/{DashboardID}":
-		return middleware.ReqOrgAdmin
-	case http.MethodPost + "/api/v1/upgrade/dashboards/{DashboardID}/panels/{PanelID}":
-		return middleware.ReqOrgAdmin
-	case http.MethodPost + "/api/v1/upgrade/channels":
-		return middleware.ReqOrgAdmin
-	case http.MethodPost + "/api/v1/upgrade/channels/{ChannelID}":
-		return middleware.ReqOrgAdmin
+	// Grafana receivers paths
+	case http.MethodGet + "/api/v1/notifications/receivers":
+		// additional authorization is done at the service level
+		eval = ac.EvalAny(
+			ac.EvalPermission(ac.ActionAlertingNotificationsRead),
+			ac.EvalPermission(ac.ActionAlertingReceiversList),
+			ac.EvalPermission(ac.ActionAlertingReceiversRead),
+			ac.EvalPermission(ac.ActionAlertingReceiversReadSecrets),
+		)
+	case http.MethodGet + "/api/v1/notifications/receivers/{Name}":
+		// TODO: scope to :Name
+		eval = ac.EvalAny(
+			ac.EvalPermission(ac.ActionAlertingReceiversRead),
+			ac.EvalPermission(ac.ActionAlertingReceiversReadSecrets),
+		)
 
 	// Grafana, Prometheus-compatible Paths
 	case http.MethodGet + "/api/prometheus/grafana/api/v1/rules":
@@ -236,8 +235,12 @@ func (api *API) authorize(method, path string) web.Handler {
 		http.MethodPost + "/api/v1/provisioning/alert-rules",
 		http.MethodPut + "/api/v1/provisioning/alert-rules/{UID}",
 		http.MethodDelete + "/api/v1/provisioning/alert-rules/{UID}",
-		http.MethodPut + "/api/v1/provisioning/folder/{FolderUID}/rule-groups/{Group}":
+		http.MethodPut + "/api/v1/provisioning/folder/{FolderUID}/rule-groups/{Group}",
+		http.MethodDelete + "/api/v1/provisioning/folder/{FolderUID}/rule-groups/{Group}":
 		eval = ac.EvalPermission(ac.ActionAlertingProvisioningWrite) // organization scope
+	case http.MethodGet + "/api/v1/notifications/time-intervals/{name}",
+		http.MethodGet + "/api/v1/notifications/time-intervals":
+		eval = ac.EvalAny(ac.EvalPermission(ac.ActionAlertingNotificationsRead), ac.EvalPermission(ac.ActionAlertingNotificationsTimeIntervalsRead), ac.EvalPermission(ac.ActionAlertingProvisioningRead))
 	}
 
 	if eval != nil {

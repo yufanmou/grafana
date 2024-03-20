@@ -20,10 +20,11 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
+
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/infra/tracing"
+	"github.com/grafana/grafana/pkg/promlib/converter"
 	"github.com/grafana/grafana/pkg/tsdb/loki/instrumentation"
-	"github.com/grafana/grafana/pkg/util/converter"
 )
 
 type LokiAPI struct {
@@ -332,7 +333,9 @@ func getSupportingQueryHeaderValue(req *http.Request, supportingQueryType Suppor
 		value = "logsample"
 	case SupportingQueryDataSample:
 		value = "datasample"
-	default: //ignore
+	case SupportingQueryInfiniteScroll:
+		value = "infinitescroll"
+	default: // ignore
 	}
 
 	return value

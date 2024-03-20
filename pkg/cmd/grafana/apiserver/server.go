@@ -6,19 +6,18 @@ import (
 	"net"
 	"path"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	"k8s.io/apiserver/pkg/server/options"
 	"k8s.io/client-go/tools/clientcmd"
 	netutils "k8s.io/utils/net"
 
-	"github.com/grafana/grafana/pkg/registry/apis/example"
-	"github.com/grafana/grafana/pkg/registry/apis/featuretoggle"
-	"github.com/grafana/grafana/pkg/server"
-	"github.com/grafana/grafana/pkg/services/featuremgmt"
-	grafanaAPIServer "github.com/grafana/grafana/pkg/services/grafana-apiserver"
-	"github.com/grafana/grafana/pkg/services/grafana-apiserver/utils"
-	"github.com/grafana/grafana/pkg/services/licensing"
+	"github.com/grafana/grafana/pkg/apiserver/builder"
+	grafanaAPIServer "github.com/grafana/grafana/pkg/services/apiserver"
+	grafanaAPIServerOptions "github.com/grafana/grafana/pkg/services/apiserver/options"
+	"github.com/grafana/grafana/pkg/services/apiserver/standalone"
+	"github.com/grafana/grafana/pkg/services/apiserver/utils"
 	"github.com/grafana/grafana/pkg/setting"
 )
 
@@ -29,7 +28,9 @@ const (
 
 // APIServerOptions contains the state for the apiserver
 type APIServerOptions struct {
-	builders           []grafanaAPIServer.APIGroupBuilder
+	factory            standalone.APIServerFactory
+	builders           []builder.APIGroupBuilder
+	ExtraOptions       *grafanaAPIServerOptions.ExtraOptions
 	RecommendedOptions *options.RecommendedOptions
 	AlternateDNS       []string
 
@@ -41,35 +42,26 @@ func newAPIServerOptions(out, errOut io.Writer) *APIServerOptions {
 	return &APIServerOptions{
 		StdOut: out,
 		StdErr: errOut,
+		RecommendedOptions: options.NewRecommendedOptions(
+			defaultEtcdPathPrefix,
+			grafanaAPIServer.Codecs.LegacyCodec(), // the codec is passed to etcd and not used
+		),
+		ExtraOptions: grafanaAPIServerOptions.NewExtraOptions(),
 	}
 }
 
-func (o *APIServerOptions) loadAPIGroupBuilders(args []string) error {
-	o.builders = []grafanaAPIServer.APIGroupBuilder{}
-	for _, g := range args {
-		switch g {
-		// No dependencies for testing
-		case "example.grafana.app":
-			o.builders = append(o.builders, example.NewTestingAPIBuilder())
-		case "featuretoggle.grafana.app":
-			features, err := featuremgmt.ProvideManagerService(&setting.Cfg{}, &licensing.OSSLicensingService{})
-			if err != nil {
-				return err
-			}
-			o.builders = append(o.builders, featuretoggle.NewFeatureFlagAPIBuilder(features))
-		case "testdata.datasource.grafana.app":
-			ds, err := server.InitializeDataSourceAPIServer(g)
-			if err != nil {
-				return err
-			}
-			o.builders = append(o.builders, ds)
-		default:
-			return fmt.Errorf("unknown group: %s", g)
+func (o *APIServerOptions) loadAPIGroupBuilders(apis []schema.GroupVersion) error {
+	o.builders = []builder.APIGroupBuilder{}
+	for _, gv := range apis {
+		api, err := o.factory.MakeAPIServer(gv)
+		if err != nil {
+			return err
 		}
+		o.builders = append(o.builders, api)
 	}
 
 	if len(o.builders) < 1 {
-		return fmt.Errorf("expected group name(s) in the command line arguments")
+		return fmt.Errorf("no apis matched ")
 	}
 
 	// Install schemas
@@ -126,6 +118,7 @@ func (o *APIServerOptions) ModifiedApplyTo(config *genericapiserver.RecommendedC
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -162,20 +155,38 @@ func (o *APIServerOptions) Config() (*genericapiserver.RecommendedConfig, error)
 		}
 	}
 
+	if o.ExtraOptions != nil {
+		if err := o.ExtraOptions.ApplyTo(serverConfig); err != nil {
+			return nil, err
+		}
+	}
+
 	serverConfig.DisabledPostStartHooks = serverConfig.DisabledPostStartHooks.Insert("generic-apiserver-start-informers")
 	serverConfig.DisabledPostStartHooks = serverConfig.DisabledPostStartHooks.Insert("priority-and-fairness-config-consumer")
 
 	// Add OpenAPI specs for each group+version
-	err := grafanaAPIServer.SetupConfig(serverConfig, o.builders)
+	err := builder.SetupConfig(
+		grafanaAPIServer.Scheme,
+		serverConfig,
+		o.builders,
+		setting.BuildStamp,
+		setting.BuildVersion,
+		setting.BuildCommit,
+		setting.BuildBranch,
+	)
 	return serverConfig, err
 }
 
 // Validate validates APIServerOptions
-// NOTE: we don't call validate on the top level recommended options as it doesn't like skipping etcd-servers
-// the function is left here for troubleshooting any other config issues
-func (o *APIServerOptions) Validate(args []string) error {
-	errors := []error{}
-	errors = append(errors, o.RecommendedOptions.Validate()...)
+func (o *APIServerOptions) Validate() error {
+	errors := make([]error, 0)
+	// NOTE: we don't call validate on the top level recommended options as it doesn't like skipping etcd-servers
+	// the function is left here for troubleshooting any other config issues
+	// errors = append(errors, o.RecommendedOptions.Validate()...)
+	if factoryOptions := o.factory.GetOptions(); factoryOptions != nil {
+		errors = append(errors, factoryOptions.ValidateOptions()...)
+	}
+
 	return utilerrors.NewAggregate(errors)
 }
 
@@ -188,23 +199,25 @@ func (o *APIServerOptions) RunAPIServer(config *genericapiserver.RecommendedConf
 	delegationTarget := genericapiserver.NewEmptyDelegate()
 	completedConfig := config.Complete()
 
-	server, err := completedConfig.New("example-apiserver", delegationTarget)
+	server, err := completedConfig.New("standalone-apiserver", delegationTarget)
 	if err != nil {
 		return err
 	}
 
 	// Install the API Group+version
-	err = grafanaAPIServer.InstallAPIs(server, config.RESTOptionsGetter, o.builders)
+	err = builder.InstallAPIs(grafanaAPIServer.Scheme, grafanaAPIServer.Codecs, server, config.RESTOptionsGetter, o.builders, true)
 	if err != nil {
 		return err
 	}
 
 	// write the local config to disk
-	if err = clientcmd.WriteToFile(
-		utils.FormatKubeConfig(server.LoopbackClientConfig),
-		path.Join(dataPath, "apiserver.kubeconfig"),
-	); err != nil {
-		return err
+	if o.ExtraOptions.DevMode {
+		if err = clientcmd.WriteToFile(
+			utils.FormatKubeConfig(server.LoopbackClientConfig),
+			path.Join(dataPath, "apiserver.kubeconfig"),
+		); err != nil {
+			return err
+		}
 	}
 
 	return server.PrepareRun().Run(stopCh)
