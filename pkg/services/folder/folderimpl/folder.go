@@ -135,42 +135,6 @@ func (s *Service) DBMigration(db db.DB) {
 	s.log.Debug("syncing dashboard and folder tables finished")
 }
 
-func (s *Service) GetFoldersTemp(ctx context.Context, q *folder.GetFoldersQuery) ([]*folder.Folder, error) {
-	if q.SignedInUser == nil {
-		return nil, folder.ErrBadRequest.Errorf("missing signed in user")
-	}
-
-	// contrary to the nested folders store that returns empty array if no UIDs are provided,
-	// this one returns all folders if no UIDs are provided
-	// therefore any callers that do not provide UIDs are assumed to want all folders
-	folders, err := s.dashboardFolderStore.GetFolders(ctx, q.OrgID, q.UIDs)
-	if err != nil {
-		s.log.Error("failed to fetch folders from folder store", "error", err)
-		return nil, err
-	}
-
-	filtered := make([]*folder.Folder, 0, len(folders))
-	for _, f := range folders {
-		g, err := guardian.NewByFolder(ctx, f, f.OrgID, q.SignedInUser)
-		if err != nil {
-			return nil, err
-		}
-		canView, err := g.CanView()
-		if err != nil {
-			return nil, err
-		}
-		if canView {
-			f, err := s.WithFullpath(ctx, f, q.WithFullpath)
-			if err != nil {
-				s.log.Error("failed to fetch folder full path", "error", err)
-			}
-			filtered = append(filtered, f)
-		}
-	}
-
-	return filtered, nil
-}
-
 func (s *Service) GetFolders(ctx context.Context, q folder.GetFoldersQuery) ([]*folder.Folder, error) {
 	if q.SignedInUser == nil {
 		return nil, folder.ErrBadRequest.Errorf("missing signed in user")
@@ -593,6 +557,8 @@ func (s *Service) Create(ctx context.Context, cmd *folder.CreateFolderCommand) (
 	dashFolder := dashboards.NewDashboardFolder(cmd.Title)
 	dashFolder.OrgID = cmd.OrgID
 
+	// TODO: This feature flag check causes issue for provisioning: folder is created without FolderUID in dashboards table
+	// Then provisioning getOrCreateFolderByTitle fails to find the folder and tries to create it again even thought it already exists
 	if s.features.IsEnabled(ctx, featuremgmt.FlagNestedFolders) && cmd.ParentUID != "" {
 		// Check that the user is allowed to create a subfolder in this folder
 		evaluator := accesscontrol.EvalPermission(dashboards.ActionFoldersWrite, dashboards.ScopeFoldersProvider.GetResourceScopeUID(cmd.ParentUID))
@@ -1158,56 +1124,6 @@ func (s *Service) buildSaveDashboardCommand(ctx context.Context, dto *dashboards
 	}
 
 	return cmd, nil
-}
-
-// WithFullpath returns the folder with its full path. If includeFullpath is false, it returns the folder as is.
-// If the folder already has a full path, it returns the folder as is. Otherwise, it constructs the full path
-// by getting the folder's ancestors and concatenating their titles with the folder's title.
-// If the feature flag for nested folders is not enabled, it only uses the folder's title to construct the full path.
-// if the folder title contains the FULLPATH_SEPARATOR, it will be escaped with a backslash.
-func (s *Service) WithFullpath(ctx context.Context, f *folder.Folder, includeFullpath bool) (*folder.Folder, error) {
-	if !includeFullpath {
-		return f, nil
-	}
-
-	if f.Fullpath != "" {
-		return f, nil
-	}
-
-	withEscapedTitle := func(title string) string {
-		return strings.ReplaceAll(title, FULLPATH_SEPARATOR, "\\"+FULLPATH_SEPARATOR)
-	}
-
-	escapedTitle := withEscapedTitle(f.Title)
-
-	if !s.features.IsEnabled(ctx, featuremgmt.FlagNestedFolders) {
-		f.Fullpath = escapedTitle
-		return f, nil
-	}
-
-	ancestors, err := s.store.GetParents(ctx, folder.GetParentsQuery{UID: f.UID, OrgID: f.OrgID})
-	if err != nil {
-		return f, err
-	}
-
-	fullpath := ""
-	for _, ancestor := range ancestors {
-		t := withEscapedTitle(ancestor.Title)
-		if fullpath != "" {
-			fullpath += fmt.Sprintf("%s%s", FULLPATH_SEPARATOR, t)
-		} else {
-			fullpath += t
-		}
-	}
-
-	if fullpath != "" {
-		fullpath += fmt.Sprintf("%s%s", FULLPATH_SEPARATOR, escapedTitle)
-	} else {
-		fullpath += escapedTitle
-	}
-
-	f.Fullpath = fullpath
-	return f, nil
 }
 
 // SplitFullpath splits a string into an array of strings using the FULLPATH_SEPARATOR as the delimiter.
