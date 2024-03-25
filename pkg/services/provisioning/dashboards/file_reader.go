@@ -149,14 +149,14 @@ func (fr *FileReader) storeDashboardsInFolder(ctx context.Context, filesFoundOnD
 	dashboardRefs map[string]*dashboards.DashboardProvisioning, usageTracker *usageTracker) error {
 
 	folderTitles := folderimpl.SplitFullpath(fr.Cfg.Folder)
-	// TODO: should it create a folder in General if no folder is specified in the config?
-	// TODO: check current behavior
-	//if len(folderTitles) == 0 {
-	//	return fmt.Errorf("folder name must be specified %v", ErrFolderNameMissing)
-	//}
 
 	var folderID int64
 	var folderUID *string
+
+	if len(folderTitles) == 0 {
+		folderID, folderUID = folder.GeneralFolder.ID, &folder.GeneralFolder.UID
+	}
+
 	for i := range folderTitles {
 		id, uid, err := fr.getOrCreateFolderByTitle(ctx, folderTitles[i], fr.Cfg.OrgID, folderUID)
 		if err != nil && !errors.Is(err, ErrFolderNameMissing) {
