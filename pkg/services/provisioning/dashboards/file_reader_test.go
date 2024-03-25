@@ -2,6 +2,7 @@ package dashboards
 
 import (
 	"context"
+	"github.com/grafana/grafana/pkg/services/folder/folderimpl"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -480,6 +481,33 @@ func TestDashboardFileReader(t *testing.T) {
 			require.NoError(t, err)
 		})
 	})
+}
+
+func TestNestedFoldersFromConfig(t *testing.T) {
+	expected := map[string][]string{
+		"case1": {`gdev \dashboards`},
+		"case2": {`gdev \\dashboards`},
+		"case3": {`gdev //dashboards`},
+		"case4": {`gdev \dashboards`},
+		"case5": {"gdev ", " dashboards"},
+		"case6": {"gdev ", " dashboards"},
+	}
+
+	cfgReader := &configReader{path: "testdata/test-configs/nested-folders", log: log.New("test-logger"), orgService: nil}
+	files, err := os.ReadDir(cfgReader.path)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	configs, err := cfgReader.parseConfigs(files[0])
+	require.NoError(t, err)
+
+	for _, c := range configs {
+		_, ok := expected[c.Name]
+		if !ok {
+			continue
+		}
+		folderTitles := folderimpl.SplitFullpath(c.Folder)
+		assert.ElementsMatch(t, expected[c.Name], folderTitles, "Expected %v, got %v", expected[c.Name], folderTitles)
+	}
 }
 
 type FakeFileInfo struct {

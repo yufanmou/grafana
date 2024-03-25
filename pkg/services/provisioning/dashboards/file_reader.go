@@ -144,17 +144,13 @@ func (fr *FileReader) isDatabaseAccessRestricted() bool {
 	return fr.dbWriteAccessRestricted
 }
 
-// splitFn is passed to strings.FieldsFunc to split the string and remove the empty token
-var splitFn = func(char rune) bool {
-	return string(char) == folderimpl.FULLPATH_SEPARATOR
-}
-
 // storeDashboardsInFolder saves dashboards from the filesystem on disk to the folder from config
 func (fr *FileReader) storeDashboardsInFolder(ctx context.Context, filesFoundOnDisk map[string]os.FileInfo,
 	dashboardRefs map[string]*dashboards.DashboardProvisioning, usageTracker *usageTracker) error {
 
-	folderTitles := strings.FieldsFunc(fr.Cfg.Folder, splitFn)
+	folderTitles := folderimpl.SplitFullpath(fr.Cfg.Folder)
 	// TODO: should it create a folder in General if no folder is specified in the config?
+	// TODO: check current behavior
 	if len(folderTitles) == 0 {
 		return fmt.Errorf("folder name must be specified %v", ErrFolderNameMissing)
 	}

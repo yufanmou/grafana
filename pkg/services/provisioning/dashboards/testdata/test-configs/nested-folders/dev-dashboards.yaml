@@ -1,0 +1,15 @@
+apiVersion: 1
+providers:
+  - name: case1
+    folder: "gdev \\dashboards"
+  - name: case2
+    folder: 'gdev \\dashboards'
+  - name: case3
+    folder: 'gdev \/\/dashboards'
+  - name: case4
+    folder: 'gdev \dashboards'
+  - name: case5
+    folder: "gdev // dashboards"
+  - name: case6
+    folder: 'gdev // dashboards'
+
