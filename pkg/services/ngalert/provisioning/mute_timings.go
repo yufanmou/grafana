@@ -3,7 +3,6 @@ package provisioning
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"hash/fnv"
 	"slices"
@@ -171,16 +170,17 @@ func (svc *MuteTimingService) UpdateMuteTiming(ctx context.Context, mt definitio
 		return definitions.MuteTimeInterval{}, err
 	}
 
-	// if the name of the time interval changed
-	if old.Name != mt.Name {
-		// TODO implement support for renaming.
-		return definitions.MuteTimeInterval{}, MakeErrTimeIntervalInvalid(errors.New("name change is not allowed"))
-	}
-
 	revision.cfg.AlertmanagerConfig.MuteTimeIntervals[idx] = mt.MuteTimeInterval
 
 	// TODO add diff and noop detection
 	err = svc.xact.InTransaction(ctx, func(ctx context.Context) error {
+		// if the name of the time interval changed
+		if old.Name != mt.Name {
+			err = svc.renameTimeIntervalInDependentResources(ctx, orgID, revision.cfg.AlertmanagerConfig.Route, old.Name, mt.Name, models.Provenance(mt.Provenance))
+			if err != nil {
+				return err
+			}
+		}
 		if err := svc.configStore.Save(ctx, revision, orgID); err != nil {
 			return err
 		}
@@ -195,6 +195,34 @@ func (svc *MuteTimingService) UpdateMuteTiming(ctx context.Context, mt definitio
 		Version:          calculateMuteTimeIntervalFingerprint(mt.MuteTimeInterval),
 		Provenance:       mt.Provenance,
 	}, err
+}
+
+func (svc *MuteTimingService) renameTimeIntervalInDependentResources(ctx context.Context, orgID int64, route *definitions.Route, oldName, newName string, timeIntervalProvenance models.Provenance) error {
+	allowedProvenance := validation.GetAllowedProvenanceForDependentResources(timeIntervalProvenance)
+	// if there are no references to the old time interval, exit
+	var updatedRoutes int
+	if isMuteTimeInUseInRoutes(oldName, route) {
+		routeProvenance, err := svc.provenanceStore.GetProvenance(ctx, route, orgID)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(allowedProvenance, routeProvenance) {
+			return MakeErrTimeIntervalDependentResourcesProvenance(true, nil)
+		}
+		updatedRoutes = replaceMuteTiming(route, oldName, newName)
+	}
+
+	affected, invalidProvenance, err := svc.ruleNotificationsStore.RenameTimeIntervalInNotificationSettings(ctx, orgID, oldName, newName, allowedProvenance)
+	if err != nil {
+		return err
+	}
+	if len(invalidProvenance) > 0 {
+		return MakeErrTimeIntervalDependentResourcesProvenance(false, invalidProvenance)
+	}
+	if len(affected) > 0 || updatedRoutes > 0 {
+		svc.log.FromContext(ctx).Info("Updated rules and routes that use renamed time interval", "oldName", oldName, "newName", newName, "rules", len(affected), "routes", updatedRoutes)
+	}
+	return nil
 }
 
 // DeleteMuteTiming deletes the mute timing with the given name in the given org. If the mute timing does not exist, no error is returned.
@@ -360,4 +388,21 @@ func getIntervalUID(t config.MuteTimeInterval) string {
 	sum := fnv.New64()
 	_, _ = sum.Write([]byte(t.Name))
 	return fmt.Sprintf("%016x", sum.Sum64())
+}
+
+func replaceMuteTiming(route *definitions.Route, oldName, newName string) int {
+	if route == nil {
+		return 0
+	}
+	updated := 0
+	for idx := range route.MuteTimeIntervals {
+		if route.MuteTimeIntervals[idx] == oldName {
+			route.MuteTimeIntervals[idx] = newName
+			updated++
+		}
+	}
+	for _, route := range route.Routes {
+		updated += replaceMuteTiming(route, oldName, newName)
+	}
+	return updated
 }
