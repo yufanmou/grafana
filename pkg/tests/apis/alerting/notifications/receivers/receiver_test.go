@@ -342,3 +342,66 @@ func TestIntegrationTimeIntervalAccessControl(t *testing.T) {
 		})
 	}
 }
+
+func TestIntegrationReceiverProvisioning(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	helper := getTestHelper(t)
+
+	org := helper.Org1
+
+	admin := org.Admin
+	adminK8sClient, err := versioned.NewForConfig(admin.NewRestConfig())
+	require.NoError(t, err)
+	adminClient := adminK8sClient.NotificationsV0alpha1().Receivers("default")
+
+	env := helper.GetEnv()
+	ac := acimpl.ProvideAccessControl(env.FeatureToggles, zanzana.NewNoopClient())
+	db, err := store.ProvideDBStore(env.Cfg, env.FeatureToggles, env.SQLStore, &foldertest.FakeService{}, &dashboards.FakeDashboardService{}, ac)
+	require.NoError(t, err)
+
+	created := createReceiver(t, helper, &v0alpha1.Receiver{
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: "default",
+		},
+		Spec: v0alpha1.ReceiverSpec{
+			Title: "test-receiver-1",
+			Integrations: []v0alpha1.Integration{
+				{
+					Settings: json.RawMessage(notify.AllKnownConfigsForTesting["webhook"].Config),
+					Type:     "webhook",
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "none", created.GetProvenanceStatus())
+
+	t.Run("should provide provenance status", func(t *testing.T) {
+		require.NoError(t, db.SetProvenance(ctx, &definitions.EmbeddedContactPoint{
+			UID: *created.Spec.Integrations[0].Uid,
+		}, admin.Identity.GetOrgID(), "API"))
+
+		got, err := adminClient.Get(ctx, created.Name, v1.GetOptions{})
+		require.NoError(t, err)
+		require.Equal(t, "API", got.GetProvenanceStatus())
+	})
+	// t.Run("should not let update if provisioned", func(t *testing.T) {
+	// 	updated := created.DeepCopy()
+	// 	updated.Spec.Integrations = append(updated.Spec.Integrations, v0alpha1.Integration{
+	// 		Settings: json.RawMessage(notify.AllKnownConfigsForTesting["webhook"].Config),
+	// 		Type:     "webhook",
+	// 	})
+	//
+	// 	_, err := adminClient.Update(ctx, updated, v1.UpdateOptions{})
+	// 	require.Truef(t, errors.IsForbidden(err), "should get Forbidden error but got %s", err)
+	// })
+
+	t.Run("should not let delete if provisioned", func(t *testing.T) {
+		err := adminClient.Delete(ctx, created.Name, v1.DeleteOptions{})
+		require.Truef(t, errors.IsForbidden(err), "should get Forbidden error but got %s", err)
+	})
+}
