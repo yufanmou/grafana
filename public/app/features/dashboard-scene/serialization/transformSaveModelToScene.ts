@@ -1,7 +1,7 @@
 import { uniqueId } from 'lodash';
 
 import { DataFrameDTO, DataFrameJSON, TypedVariableModel } from '@grafana/data';
-import { config } from '@grafana/runtime';
+import { config, locationService } from '@grafana/runtime';
 import {
   VizPanel,
   SceneTimePicker,
@@ -197,7 +197,7 @@ export function createDashboardSceneFromDashboardModel(oldModel: DashboardModel,
   let alertStatesLayer: AlertStatesDataLayer | undefined;
 
   if (oldModel.templating?.list?.length) {
-    if (oldModel.meta.isSnapshot) {
+    if (oldModel.meta.isSnapshot || locationService.getLocation().pathname.includes('/d-report')) {
       const variableObjects = oldModel.templating.list
         .map((v) => {
           try {
