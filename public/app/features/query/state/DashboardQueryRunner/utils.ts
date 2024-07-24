@@ -3,6 +3,9 @@ import { Observable, of } from 'rxjs';
 
 import { AnnotationEvent, AnnotationQuery, DataFrame, DataFrameView, DataSourceApi } from '@grafana/data';
 import { config, toDataQueryError } from '@grafana/runtime';
+import { DataSourceRef, Panel } from '@grafana/schema/dist/esm/index.gen';
+import { CorrelationData } from 'app/features/correlations/useCorrelations';
+import { getCorrelationsBySourceUIDs } from 'app/features/correlations/utils';
 import { dispatch } from 'app/store/store';
 
 import { createErrorNotification } from '../../../../core/copy/appNotification';
@@ -129,4 +132,13 @@ export function annotationsFromDataFrames(data?: DataFrame[]): AnnotationEvent[]
   }
 
   return annotations;
+}
+
+export async function getCorrelationsForDashboard(panels: Panel[]): Promise<CorrelationData[]> {
+  // todo mixed scenario
+  const datasources = panels
+    .map((panel) => panel.datasource)
+    .filter((ds): ds is DataSourceRef => !!ds && ds.uid !== undefined)
+    .map((ds) => ds.uid!);
+  return (await getCorrelationsBySourceUIDs(datasources)).correlations;
 }

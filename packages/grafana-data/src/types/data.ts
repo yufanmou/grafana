@@ -1,5 +1,6 @@
 import { DataFrameDTO, FieldConfig } from './dataFrame';
 import { DataFrameType } from './dataFrameTypes';
+import { DataLinkTransformationConfig } from './dataLink';
 import { ApplyFieldOverrideOptions } from './fieldOverrides';
 import { PanelPluginDataSupport } from './panel';
 import { DataTopic } from './query';
@@ -205,6 +206,26 @@ export enum NullValueMode {
   AsZero = 'null as zero',
 }
 
+type CorrelationConfigType = 'query';
+
+export interface CorrelationConfig {
+  field: string;
+  target: object; // this contains anything that would go in the query editor, so any extension off DataQuery a datasource would have, and needs to be generic
+  type: CorrelationConfigType;
+  transformations?: DataLinkTransformationConfig[];
+}
+
+export interface Correlation {
+  uid: string;
+  sourceUID: string;
+  targetUID: string;
+  label?: string;
+  description?: string;
+  provisioned: boolean;
+  orgId?: number;
+  config: CorrelationConfig;
+}
+
 /**
  * Describes and API for exposing panel specific data configurations.
  */
@@ -213,6 +234,7 @@ export interface DataConfigSource {
   getDataSupport: () => PanelPluginDataSupport;
   getTransformations: () => DataTransformerConfig[] | undefined;
   getFieldOverrideOptions: () => ApplyFieldOverrideOptions | undefined;
+  getCorrelations: () => Correlation[] | undefined;
   snapshotData?: DataFrameDTO[];
 }
 

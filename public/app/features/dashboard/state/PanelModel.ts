@@ -21,6 +21,7 @@ import {
   restoreCustomOverrideRules,
   getNextRefId,
 } from '@grafana/data';
+import { Correlation } from '@grafana/data/src/types/data';
 import { getTemplateSrv, RefreshEvent } from '@grafana/runtime';
 import { LibraryPanel, LibraryPanelRef } from '@grafana/schema';
 import config from 'app/core/config';
@@ -174,6 +175,7 @@ export class PanelModel implements DataConfigSource, IPanelModel {
   panels?: PanelModel[];
   declare targets: DataQuery[];
   transformations?: DataTransformerConfig[];
+  correlations?: Correlation[];
   datasource: DataSourceRef | null = null;
   thresholds?: any;
   pluginVersion?: string;
@@ -231,7 +233,6 @@ export class PanelModel implements DataConfigSource, IPanelModel {
     this.replaceVariables = this.replaceVariables.bind(this);
     this.key = uuidv4();
   }
-
   /** Given a persistened PanelModel restores property values */
   restoreModel(model: any) {
     // Start with clean-up
@@ -597,6 +598,10 @@ export class PanelModel implements DataConfigSource, IPanelModel {
 
   getTransformations() {
     return this.transformations;
+  }
+
+  getCorrelations() {
+    return this.correlations;
   }
 
   getFieldOverrideOptions() {
