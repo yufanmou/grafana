@@ -6,6 +6,7 @@ import { config, toDataQueryError } from '@grafana/runtime';
 import { DataSourceRef, Panel } from '@grafana/schema/dist/esm/index.gen';
 import { CorrelationData } from 'app/features/correlations/useCorrelations';
 import { getCorrelationsBySourceUIDs } from 'app/features/correlations/utils';
+import { PanelModel } from 'app/features/dashboard/state';
 import { dispatch } from 'app/store/store';
 
 import { createErrorNotification } from '../../../../core/copy/appNotification';
@@ -134,7 +135,7 @@ export function annotationsFromDataFrames(data?: DataFrame[]): AnnotationEvent[]
   return annotations;
 }
 
-export async function getCorrelationsForDashboard(panels: Panel[]): Promise<CorrelationData[]> {
+export async function getCorrelationsForDashboard(panels: PanelModel[]): Promise<CorrelationData[]> {
   // todo mixed scenario
   const datasources = panels
     .map((panel) => panel.datasource)

@@ -18,7 +18,7 @@ import {
   DashboardQueryRunnerWorker,
   DashboardQueryRunnerWorkerResult,
 } from './types';
-import { getAnnotationsByPanelId } from './utils';
+import { getAnnotationsByPanelId, getCorrelationsForDashboard } from './utils';
 
 class DashboardQueryRunnerImpl implements DashboardQueryRunner {
   private readonly results: ReplaySubject<DashboardQueryRunnerWorkerResult>;
@@ -58,6 +58,7 @@ class DashboardQueryRunnerImpl implements DashboardQueryRunner {
     return this.results.asObservable().pipe(
       map((result) => {
         const annotations = getAnnotationsByPanelId(result.annotations, panelId);
+        const correlations = getCorrelationsForDashboard(this.dashboard.panels);
         const alertState = result.alertStates.find((res) => Boolean(panelId) && res.panelId === panelId);
         return { annotations: dedupAnnotations(annotations), alertState };
       })
